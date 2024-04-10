@@ -15,22 +15,27 @@ def to_csv(timestamps):
         fieldnames = ['0','1','2','3','4','5','6']
         writer = csv.DictWriter(csvfile,fieldnames=fieldnames)
 
-
-
-        writer.writerow({'0':"0", "1":"0", "2":"Header", "3":"1", "4":"2", "5":"44100"})
-        writer.writerow({'0':"1", "1":"0", "2":"Start_track"})
-        writer.writerow({'0':"1", "1":"0", "2":"Title_t", "3":"Close Encounters"})
-        writer.writerow({'0':"1", "1":"0", "2":"Text_t", "3":"Sample for MIDIcsv Distribution"})
-        writer.writerow({'0':"1", "1":"0", "2":"Copyright_t", "3":"This file is in the public domain"})
-        writer.writerow({'0':"1", "1":"0", "2":"Time_signature", "3":"4", "4":"2", "5":"24", "6":"8"})
-        writer.writerow({'0':"1", "1":"0", "2":"Tempo", "3":"500000"})
-        writer.writerow({'0':"1", "1":"0", "2":"End_track"})
-        writer.writerow({'0':"2", "1":"0", "2":"Start_track"})
-        writer.writerow({'0':"2", "1":"0", "2":"Instrument_name_t", "3":"Piano"})
+        csvfile.write("0, 1, Header, 1, 2, 44100\n")
+        csvfile.write("1, 0, Start_track\n")
+        csvfile.write("1, 0, Title_t, \"Close Encounters\"\n")
+        csvfile.write("1, 0, Text_t, \"Sample for MIDIcsv Distribution\"\n")
+        csvfile.write("1, 0, Copyright_t, \"This file is in the public domain\"\n")
+        csvfile.write("1, 0, Time_signature, 4, 2, 24, 8\n")
+        csvfile.write("1, 0, Tempo, 500000\n")
+        csvfile.write("1, 0, End_track\n")
+        csvfile.write("2, 0, Start_track\n")
+        csvfile.write("2, 0, Instrument_name_t, \"Piano\"\n")
+        csvfile.write("2, 0, Program_c, 1, 1\n")
         for i in timestamps:
-            writer.writerow({"0":"1","1":np.floor(i/20*441000),"2":"Note_on_c","3":"1","4":"70","5":"100"})
-            writer.writerow({"0":"1","1":np.floor(i/20*441000),"2":"Note_off_c","3":"1","4":"70","5":"100"})
-        writer.writerow({"0":"0","1":"0","2":"End_of_file"})
+            csvfile.write("1, ")
+            csvfile.write(str(int(i/20*441000)))
+            csvfile.write(", Note_on_c,1,70,100\n")
+            csvfile.write("1, ")
+            csvfile.write(str(int(i/20*441000)+100))
+            csvfile.write(", Note_off_c,1,70,100\n")
+        csvfile.write("2, 441000, End_track\n")
+        csvfile.write("0, 0, End_of_file")
+
     
     return 
 
@@ -147,12 +152,39 @@ def fromNoveltyToTimestamps(novelty,audiosize,threshold):
             neighbor=i
     return timeStamps
 
+def subdivide_beats(beats):
+    subdividedbeats=beats.copy()
+    i=0
+    while  i < len(subdividedbeats)-1:
+        subdividedbeats.insert(i+1,(subdividedbeats[i]+subdividedbeats[i+1])/2)
+        i+=2
+    return subdividedbeats
+
+def find_closest_beat(timestamp,beats):
+    closest_beat=100000
+    for beat in beats:
+        if (np.abs(timestamp-beat)>np.abs(timestamp-closest_beat)):
+            closest_beat=beat
+    return closest_beat
+    
+
+def quantize_timestamps(timestamps,beats,strengh):
+    subdividedbeats=subdivide_beats(beats)
+    quantized_timestamps=[]
+    for timestamp in timestamps:
+        closest_beat=find_closest_beat(timestamp,subdividedbeats)
+        if(closest_beat<strengh):
+            quantized_timestamps.append(closest_beat)
+        else:
+            quantized_timestamps.append(timestamp)
+
+    return quantized_timestamps
+
+
 label_keys={'linewidth': 1, 'linestyle': ':', 'color': 'b'}
 label_keys2={'linewidth': 1, 'linestyle': ':', 'color': 'k'}
 
-
-
-y, sr = librosa.load('test2.mp3',duration=20)
+y, sr = librosa.load('test2.mp3')
 plp = librosa.beat.plp(y=y,sr=sr,tempo_min=50,tempo_max=150)
 tempo, beats = librosa.beat.beat_track(y=y, units='time', trim=True,tightness=10)
 onsets = librosa.onset.onset_detect(y=y,hop_length=100, units='time')
@@ -168,7 +200,6 @@ libfmp.b.plot_signal(novelty1, Fs=sr,ax=ax2, color='k', title='Novelty function 
 libfmp.b.plot_signal(novelty2, Fs=sr,ax=ax2, color='green', title='Novelty function (original)')
 
 timestamps=fromNoveltyToTimestamps(novelty2,len(y),0.05 )
-libfmp.b.plot_annotation_line(timestamps,ax3,time_min=0)
 """
 ax3 = plt.subplot(315)
 libfmp.b.plot_signal(novelty3, Fs=sr,ax=ax3, color='k', title='Novelty function (original)')
@@ -176,27 +207,30 @@ ax3 = plt.subplot(316)
 libfmp.b.plot_signal(novelty4, Fs=sr,ax=ax3, color='k', title='Novelty function (original)')
 """
 beats=beats.tolist()
+
 for i in reversed(range(len(beats))):
     if(i>len(beats)):
         break
     if( i % 2 == 1): 
         beats.pop(i)
 
+libfmp.b.plot_annotation_line(quantize_timestamps(timestamps,beats,1000),ax3,time_min=0)
 libfmp.b.plot_annotation_line(beats,ax3,colors='prism',dpi=128,time_min=0)
 libfmp.b.plot_annotation_line(onsets,ax1,label_keys=label_keys2,dpi=500,time_min=0)
 
 
 
 #plt.plot()
-print(len(novelty1),len(novelty2),len(y))
+print(len(novelty1),len(novelty2),len(y),tempo/2)
+
 plt.show()
 
-to_csv(timestamps)
+to_csv(quantize_timestamps(timestamps,beats,1000))
 
 csv_string = ""
 
 with open("test.csv", "r") as f:
-    csv_string=f.readlines(len(timestamps))
+    csv_string=f.readlines(100000)
 # Parse the CSV output of the previous command back into a MIDI file
 midi_object = pm.csv_to_midi(csv_string)
 
