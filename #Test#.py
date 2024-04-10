@@ -9,29 +9,33 @@ import numpy as np
 import csv
 import py_midicsv as pm
 
+duration=300
 
-def to_csv(timestamps):
+def calculateTsPerBeat(tempo,lengh,duration):
+    return lengh/duration*60/tempo
+
+def to_csv(timestamps,beats,lengh,tempo):
     with open('test.csv', 'w', newline='') as csvfile:
         fieldnames = ['0','1','2','3','4','5','6']
         writer = csv.DictWriter(csvfile,fieldnames=fieldnames)
 
-        csvfile.write("0, 1, Header, 1, 2, 44100\n")
+        csvfile.write("0, 1, Header, 1, 2,"+ str(int(calculateTsPerBeat(tempo,lengh,duration)))+"\n")
         csvfile.write("1, 0, Start_track\n")
         csvfile.write("1, 0, Title_t, \"Close Encounters\"\n")
         csvfile.write("1, 0, Text_t, \"Sample for MIDIcsv Distribution\"\n")
         csvfile.write("1, 0, Copyright_t, \"This file is in the public domain\"\n")
         csvfile.write("1, 0, Time_signature, 4, 2, 24, 8\n")
-        csvfile.write("1, 0, Tempo, 500000\n")
+        csvfile.write("1, 0, Tempo,"+str(int(60000000/tempo)    )+"\n")
         csvfile.write("1, 0, End_track\n")
         csvfile.write("2, 0, Start_track\n")
         csvfile.write("2, 0, Instrument_name_t, \"Piano\"\n")
         csvfile.write("2, 0, Program_c, 1, 1\n")
         for i in timestamps:
             csvfile.write("1, ")
-            csvfile.write(str(int(i/20*441000)))
+            csvfile.write(str(int(i)))
             csvfile.write(", Note_on_c,1,70,100\n")
             csvfile.write("1, ")
-            csvfile.write(str(int(i/20*441000)+100))
+            csvfile.write(str(int(i+500)))
             csvfile.write(", Note_off_c,1,70,100\n")
         csvfile.write("2, 441000, End_track\n")
         csvfile.write("0, 0, End_of_file")
@@ -160,33 +164,53 @@ def subdivide_beats(beats):
         i+=2
     return subdividedbeats
 
-def find_closest_beat(timestamp,beats):
+def find_closest_beat(timestamp,beats,lengh):
     closest_beat=100000
     for beat in beats:
-        if (np.abs(timestamp-beat)>np.abs(timestamp-closest_beat)):
-            closest_beat=beat
+        if (np.abs(timestamp-beat)<np.abs(closest_beat)):
+            closest_beat=timestamp-beat
+    print(closest_beat)
     return closest_beat
     
 
-def quantize_timestamps(timestamps,beats,strengh):
-    subdividedbeats=subdivide_beats(beats)
+def quantize_timestamps(timestamps,beats,strengh,tempo,lengh):
+    correctedbeats=[]
+    i=0
+    tspb=calculateTsPerBeat(tempo,lengh,duration)
+    while i*tspb<lengh:
+        correctedbeats.append(i*tspb)
+        i+=1
+    subdividedbeats=subdivide_beats(subdivide_beats(correctedbeats))
+    #print(subdividedbeats)
     quantized_timestamps=[]
-    for timestamp in timestamps:
-        closest_beat=find_closest_beat(timestamp,subdividedbeats)
-        if(closest_beat<strengh):
-            quantized_timestamps.append(closest_beat)
-        else:
-            quantized_timestamps.append(timestamp)
 
+    for timestamp in timestamps:
+        quantized_timestamps.append(int((timestamp-timestamps[0])/duration*lengh))
+    print(quantized_timestamps)
+    print(subdividedbeats)
+
+
+    for timestamp in quantized_timestamps:
+        closest_beat=find_closest_beat(timestamp,subdividedbeats,lengh)
+        if(np.abs(closest_beat<strengh)):
+            for j in range(quantized_timestamps.index(timestamp),len(quantized_timestamps)):
+                #print(str(j)+":"+str(timestamps[j])+"--->"+str(timestamps[j]-closest_beat))
+                quantized_timestamps[j]=quantized_timestamps[j]-closest_beat
+    print(quantized_timestamps)
+        #else:
+         #   quantized_timestamps.append(timestamp)
+    
     return quantized_timestamps
 
 
 label_keys={'linewidth': 1, 'linestyle': ':', 'color': 'b'}
 label_keys2={'linewidth': 1, 'linestyle': ':', 'color': 'k'}
 
-y, sr = librosa.load('test2.mp3')
+y, sr = librosa.load('test2.mp3',duration=duration)
 plp = librosa.beat.plp(y=y,sr=sr,tempo_min=50,tempo_max=150)
 tempo, beats = librosa.beat.beat_track(y=y, units='time', trim=True,tightness=10)
+if(tempo>150):tempo = tempo/2
+elif(tempo<50):tempo = tempo*2  
 onsets = librosa.onset.onset_detect(y=y,hop_length=100, units='time')
 #fig, ax = plt.subplots(3, 1, gridspec_kw={'height_ratios': [2, 1 ,2 ]}, figsize=(6, 2))
 novelty1=compute_novelty_energy(y, Fs=sr)
@@ -207,25 +231,26 @@ ax3 = plt.subplot(316)
 libfmp.b.plot_signal(novelty4, Fs=sr,ax=ax3, color='k', title='Novelty function (original)')
 """
 beats=beats.tolist()
-
+"""
 for i in reversed(range(len(beats))):
     if(i>len(beats)):
         break
     if( i % 2 == 1): 
         beats.pop(i)
 
-libfmp.b.plot_annotation_line(quantize_timestamps(timestamps,beats,1000),ax3,time_min=0)
+"""
+#libfmp.b.plot_annotation_line(quantize_timestamps(timestamps,beats,1000,tempo,len(y)),ax3,time_min=0)
 libfmp.b.plot_annotation_line(beats,ax3,colors='prism',dpi=128,time_min=0)
 libfmp.b.plot_annotation_line(onsets,ax1,label_keys=label_keys2,dpi=500,time_min=0)
 
 
-
+ 
 #plt.plot()
-print(len(novelty1),len(novelty2),len(y),tempo/2)
+print(len(novelty1),len(novelty2),len(y),tempo  )
 
 plt.show()
 
-to_csv(quantize_timestamps(timestamps,beats,1000))
+to_csv(quantize_timestamps(timestamps,beats,5000,tempo,len(y)),beats,len(y),tempo)
 
 csv_string = ""
 
