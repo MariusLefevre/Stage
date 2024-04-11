@@ -9,7 +9,7 @@ import numpy as np
 import csv
 import py_midicsv as pm
 
-duration=300
+duration=60
 
 def calculateTsPerBeat(tempo,lengh,duration):
     return lengh/duration*60/tempo
@@ -42,8 +42,6 @@ def to_csv(timestamps,beats,lengh,tempo):
 
     
     return 
-
-
 
 def compute_novelty_energy(x, Fs=1, N=2048, H=128, gamma=10.0, norm=True):
     """Compute energy-based novelty function
@@ -169,10 +167,9 @@ def find_closest_beat(timestamp,beats,lengh):
     for beat in beats:
         if (np.abs(timestamp-beat)<np.abs(closest_beat)):
             closest_beat=timestamp-beat
-    print(closest_beat)
+    
     return closest_beat
     
-
 def quantize_timestamps(timestamps,beats,strengh,tempo,lengh):
     correctedbeats=[]
     i=0
@@ -186,8 +183,7 @@ def quantize_timestamps(timestamps,beats,strengh,tempo,lengh):
 
     for timestamp in timestamps:
         quantized_timestamps.append(int((timestamp-timestamps[0])/duration*lengh))
-    print(quantized_timestamps)
-    print(subdividedbeats)
+
 
 
     for timestamp in quantized_timestamps:
@@ -196,7 +192,7 @@ def quantize_timestamps(timestamps,beats,strengh,tempo,lengh):
             for j in range(quantized_timestamps.index(timestamp),len(quantized_timestamps)):
                 #print(str(j)+":"+str(timestamps[j])+"--->"+str(timestamps[j]-closest_beat))
                 quantized_timestamps[j]=quantized_timestamps[j]-closest_beat
-    print(quantized_timestamps)
+
         #else:
          #   quantized_timestamps.append(timestamp)
     
@@ -207,7 +203,9 @@ label_keys={'linewidth': 1, 'linestyle': ':', 'color': 'b'}
 label_keys2={'linewidth': 1, 'linestyle': ':', 'color': 'k'}
 
 y, sr = librosa.load('test2.mp3',duration=duration)
-plp = librosa.beat.plp(y=y,sr=sr,tempo_min=50,tempo_max=150)
+onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+plp = librosa.beat.plp(onset_envelope=onset_env,tempo_min=30,tempo_max=300)
+
 tempo, beats = librosa.beat.beat_track(y=y, units='time', trim=True,tightness=10)
 if(tempo>150):tempo = tempo/2
 elif(tempo<50):tempo = tempo*2  
@@ -215,45 +213,43 @@ onsets = librosa.onset.onset_detect(y=y,hop_length=100, units='time')
 #fig, ax = plt.subplots(3, 1, gridspec_kw={'height_ratios': [2, 1 ,2 ]}, figsize=(6, 2))
 novelty1=compute_novelty_energy(y, Fs=sr)
 novelty2,fs=compute_novelty_spectrum(y, Fs=sr)
+timestamps=fromNoveltyToTimestamps(novelty2,len(y),0.05 )
+beats=beats.tolist()
+D = np.abs(librosa.stft(y))
+times = librosa.times_like(onset_env)
+beats_plp = np.flatnonzero(librosa.util.localmax(plp))
+
+
 ax1 = plt.subplot(311)
 wave=librosa.display.waveshow(y=y,ax=ax1,offset=0 ,sr=sr,color="blue") 
 ax2 = plt.subplot(312)
-ax3 = plt.subplot(313)
+ax3 = plt.subplot(313,sharex=ax1)
+
+#libfmp.b.plot_annotation_line(beats,ax3,colors='prism',dpi=128,time_min=0)
+#libfmp.b.plot_signal(plp,Fs=sr,ax=ax3)
 libfmp.b.plot_signal(novelty1, Fs=sr,ax=ax2, color='k', title='Novelty function (original)')
 #ax4 = plt.subplot(313)
 libfmp.b.plot_signal(novelty2, Fs=sr,ax=ax2, color='green', title='Novelty function (original)')
-
-timestamps=fromNoveltyToTimestamps(novelty2,len(y),0.05 )
-"""
-ax3 = plt.subplot(315)
-libfmp.b.plot_signal(novelty3, Fs=sr,ax=ax3, color='k', title='Novelty function (original)')
-ax3 = plt.subplot(316)
-libfmp.b.plot_signal(novelty4, Fs=sr,ax=ax3, color='k', title='Novelty function (original)')
-"""
-beats=beats.tolist()
-"""
-for i in reversed(range(len(beats))):
-    if(i>len(beats)):
-        break
-    if( i % 2 == 1): 
-        beats.pop(i)
-
-"""
 #libfmp.b.plot_annotation_line(quantize_timestamps(timestamps,beats,1000,tempo,len(y)),ax3,time_min=0)
-libfmp.b.plot_annotation_line(beats,ax3,colors='prism',dpi=128,time_min=0)
+ax3.plot(times,librosa.util.normalize(onset_env), alpha=0.8,label='onsetEnvelope?')
+
+"""
+???????????
+ax3.plot(times,beats_plp,color="red")
+????????????
+"""
+
 libfmp.b.plot_annotation_line(onsets,ax1,label_keys=label_keys2,dpi=500,time_min=0)
 
 
  
 #plt.plot()
-print(len(novelty1),len(novelty2),len(y),tempo  )
-
+print(len(novelty1),len(novelty2),len(y),tempo,len(plp))
 plt.show()
 
+
 to_csv(quantize_timestamps(timestamps,beats,5000,tempo,len(y)),beats,len(y),tempo)
-
 csv_string = ""
-
 with open("test.csv", "r") as f:
     csv_string=f.readlines(100000)
 # Parse the CSV output of the previous command back into a MIDI file
