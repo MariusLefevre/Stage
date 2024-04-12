@@ -1,23 +1,28 @@
 #Test#
+
 import matplotlib.pyplot as plt
 import librosa
 import scipy as sp
 from scipy import signal
-from scipy import special
 import libfmp.b
 import numpy as np
-import csv
 import py_midicsv as pm
+import easygui
 
-duration=60
+duration=30
+
+def to_secs(liste : list):
+    out=[]
+    size=len(liste)
+    for element in liste:
+        out.append(element/size*duration)
+    return out
 
 def calculateTsPerBeat(tempo,lengh,duration):
     return lengh/duration*60/tempo
 
 def to_csv(timestamps,beats,lengh,tempo):
     with open('test.csv', 'w', newline='') as csvfile:
-        fieldnames = ['0','1','2','3','4','5','6']
-        writer = csv.DictWriter(csvfile,fieldnames=fieldnames)
 
         csvfile.write("0, 1, Header, 1, 2,"+ str(int(calculateTsPerBeat(tempo,lengh,duration)))+"\n")
         csvfile.write("1, 0, Start_track\n")
@@ -30,6 +35,7 @@ def to_csv(timestamps,beats,lengh,tempo):
         csvfile.write("2, 0, Start_track\n")
         csvfile.write("2, 0, Instrument_name_t, \"Piano\"\n")
         csvfile.write("2, 0, Program_c, 1, 1\n")
+
         for i in timestamps:
             csvfile.write("1, ")
             csvfile.write(str(int(i)))
@@ -37,10 +43,8 @@ def to_csv(timestamps,beats,lengh,tempo):
             csvfile.write("1, ")
             csvfile.write(str(int(i+500)))
             csvfile.write(", Note_off_c,1,70,100\n")
-        csvfile.write("2, 441000, End_track\n")
+        csvfile.write("2, "+str(lengh)+", End_track\n")
         csvfile.write("0, 0, End_of_file")
-
-    
     return 
 
 def compute_novelty_energy(x, Fs=1, N=2048, H=128, gamma=10.0, norm=True):
@@ -146,7 +150,7 @@ def fromNoveltyToTimestamps(novelty,audiosize,threshold):
     x=len(novelty)
     timeStamps=[]
     neighbor = -100
-    window = 10
+    window = 5
     for i in range(x):
         if(novelty[i]>threshold):
             if(i>neighbor+window):
@@ -161,6 +165,18 @@ def subdivide_beats(beats):
         subdividedbeats.insert(i+1,(subdividedbeats[i]+subdividedbeats[i+1])/2)
         i+=2
     return subdividedbeats
+
+def avg_env(enveloppe):
+    summ=0
+    for i in range(len(enveloppe)):
+        summ+=enveloppe[i]
+    return summ/len(enveloppe)
+    
+def cap_env(enveloppe,threshold):
+    for i in range(len(enveloppe)):
+        if(enveloppe[i]<threshold):
+            enveloppe[i] = threshold
+    return enveloppe
 
 def find_closest_beat(timestamp,beats,lengh):
     closest_beat=100000
@@ -198,64 +214,54 @@ def quantize_timestamps(timestamps,beats,strengh,tempo,lengh):
     
     return quantized_timestamps
 
-
 label_keys={'linewidth': 1, 'linestyle': ':', 'color': 'b'}
 label_keys2={'linewidth': 1, 'linestyle': ':', 'color': 'k'}
 
-y, sr = librosa.load('test2.mp3',duration=duration)
+y, sr = librosa.load(easygui.fileopenbox(),duration=duration)
 onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-plp = librosa.beat.plp(onset_envelope=onset_env,tempo_min=30,tempo_max=300)
+
+plp = librosa.beat.plp(onset_envelope=onset_env,tempo_min=30,tempo_max=300,win_length=300)
 
 tempo, beats = librosa.beat.beat_track(y=y, units='time', trim=True,tightness=10)
-if(tempo>150):tempo = tempo/2
-elif(tempo<50):tempo = tempo*2  
+if(tempo>130):tempo = tempo/2
+elif(tempo<30):tempo = tempo*2  
 onsets = librosa.onset.onset_detect(y=y,hop_length=100, units='time')
-#fig, ax = plt.subplots(3, 1, gridspec_kw={'height_ratios': [2, 1 ,2 ]}, figsize=(6, 2))
+
 novelty1=compute_novelty_energy(y, Fs=sr)
-novelty2,fs=compute_novelty_spectrum(y, Fs=sr)
-timestamps=fromNoveltyToTimestamps(novelty2,len(y),0.05 )
+novelty2,fs=compute_novelty_spectrum(y)
+#timestamps=fromNoveltyToTimestamps(librosa.util.normalize(onset_env),len(y),0.08)
 beats=beats.tolist()
 D = np.abs(librosa.stft(y))
 times = librosa.times_like(onset_env)
-beats_plp = np.flatnonzero(librosa.util.localmax(plp))
-
+beats_plp = librosa.util.localmax(plp)
+half_env=onset_env-avg_env(onset_env)
+lissed_env=cap_env(half_env,0)
+half_env = signal.savgol_filter(half_env,10,3)
+timestamps2=fromNoveltyToTimestamps(librosa.util.normalize(lissed_env),len(y),0.3)
 
 ax1 = plt.subplot(311)
+ax3 = plt.subplot(312,sharex=ax1)
+ax2 = plt.subplot(313,sharex=ax1)
 wave=librosa.display.waveshow(y=y,ax=ax1,offset=0 ,sr=sr,color="blue") 
-ax2 = plt.subplot(312)
-ax3 = plt.subplot(313,sharex=ax1)
-
-#libfmp.b.plot_annotation_line(beats,ax3,colors='prism',dpi=128,time_min=0)
-#libfmp.b.plot_signal(plp,Fs=sr,ax=ax3)
-libfmp.b.plot_signal(novelty1, Fs=sr,ax=ax2, color='k', title='Novelty function (original)')
-#ax4 = plt.subplot(313)
-libfmp.b.plot_signal(novelty2, Fs=sr,ax=ax2, color='green', title='Novelty function (original)')
-#libfmp.b.plot_annotation_line(quantize_timestamps(timestamps,beats,1000,tempo,len(y)),ax3,time_min=0)
 ax3.plot(times,librosa.util.normalize(onset_env), alpha=0.8,label='onsetEnvelope?')
+ax3.plot(times,librosa.util.normalize(half_env), alpha=0.8,label='onsetEnvelope?')
+ax1.plot(times,beats_plp,color="red")
+ax2.plot(times,librosa.util.normalize(lissed_env))
 
-"""
-???????????
-ax3.plot(times,beats_plp,color="red")
-????????????
-"""
-
-libfmp.b.plot_annotation_line(onsets,ax1,label_keys=label_keys2,dpi=500,time_min=0)
-
-
- 
+libfmp.b.plot_annotation_line(timestamps2*duration,ax1,label_keys=label_keys2,dpi=500,time_min=0, time_max=duration)
+#libfmp.b.plot_annotation_line(timestamps*duration,ax1,label_keys=label_keys2,dpi=500,time_min=0, time_max=duration)
 #plt.plot()
+
 print(len(novelty1),len(novelty2),len(y),tempo,len(plp))
 plt.show()
 
-
-to_csv(quantize_timestamps(timestamps,beats,5000,tempo,len(y)),beats,len(y),tempo)
+to_csv(quantize_timestamps(timestamps2,beats,500,tempo,len(y)),beats,len(y),tempo)
 csv_string = ""
+
 with open("test.csv", "r") as f:
     csv_string=f.readlines(100000)
-# Parse the CSV output of the previous command back into a MIDI file
 midi_object = pm.csv_to_midi(csv_string)
 
-# Save the parsed MIDI file to disk
 with open("test.mid", "wb") as output_file:
     midi_writer = pm.FileWriter(output_file)
     midi_writer.write(midi_object)
