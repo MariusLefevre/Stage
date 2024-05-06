@@ -187,6 +187,10 @@ def find_closest_beat(timestamp,beats,lengh):
     return closest_beat
     
 def quantize_timestamps(timestamps,beats,strengh,tempo,lengh):
+    for i in reversed(range(len(timestamps)-1)):
+        print(i)
+        if timestamps[i+1]-timestamps[i]<tempo/60/16:
+            timestamps.pop(i)
     correctedbeats=[]
     i=0
     tspb=calculateTsPerBeat(tempo,lengh,duration)
@@ -196,66 +200,165 @@ def quantize_timestamps(timestamps,beats,strengh,tempo,lengh):
     subdividedbeats=subdivide_beats(subdivide_beats(correctedbeats))
     #print(subdividedbeats)
     quantized_timestamps=[]
-
+    
     for timestamp in timestamps:
         quantized_timestamps.append(int((timestamp-timestamps[0])/duration*lengh))
 
 
-
+    
     for timestamp in quantized_timestamps:
         closest_beat=find_closest_beat(timestamp,subdividedbeats,lengh)
         if(np.abs(closest_beat<strengh)):
             for j in range(quantized_timestamps.index(timestamp),len(quantized_timestamps)):
-                #print(str(j)+":"+str(timestamps[j])+"--->"+str(timestamps[j]-closest_beat))
+                
                 quantized_timestamps[j]=quantized_timestamps[j]-closest_beat
+        print(str(j)+":"+str(timestamps[j])+"--->"+str(timestamps[j]-closest_beat))
 
         #else:
          #   quantized_timestamps.append(timestamp)
     
     return quantized_timestamps
 
+def genWindow(size):
+    windowenv=[0]*size
+    print("taille window ",len(windowenv))
+    for i in range(int(size)):
+            win=np.square(np.sin((np.pi*i)/size))
+            windowenv[i]=win+windowenv[i]
+    return windowenv
+    
+def localSpikeSelection(enveloppe):
+    sizeWindow=int((tempo/60)/duration*len(enveloppe))
+    nbWindow=2*int(len(enveloppe)/sizeWindow)
+    print(tempo,"/60/",duration,"*",len(enveloppe),"=",sizeWindow," donc nbwindow=",nbWindow)
+    Window=int(len(enveloppe)/nbWindow)
+    offset=0    
+    avg=0
+    timestamps=[]
+    processedEnv=[0]*len(enveloppe)
+    Env=genWindow(sizeWindow)  
+    windowenv=[0]*len(enveloppe)
+    print(Window)
+    for j in range(-1,nbWindow*2):
+        offset=int(j*sizeWindow/2) 
+        somme=0
+        count=0
+        for i in range(sizeWindow):
+            if(i+offset>0 and i+offset<len(windowenv)):
+                if(enveloppe[i+offset]>0):
+                    count+=1
+                    somme+=enveloppe[i+offset]
+        if(count>0):
+            avg=somme/count
+        for i in range(sizeWindow):
+            if(i+offset>0 and i+offset<len(windowenv)):
+                windowenv[i+offset]=windowenv[i+offset]+Env[i]*1*avg    
+        
+    for j in range(len(enveloppe)):
+        if(enveloppe[j]>windowenv[j]):
+            processedEnv[j]=enveloppe[j]
+            timestamps.append(j)
+                
+
+    #win2=windowenv+genWindow(Window,int(Window*1.5),len(enveloppe))
+    """
+    for j in range(-2,nbWindow-2):
+        x=int(j*(Window/3))
+        nb=0
+        somme=0
+        avg=0
+
+        for i in range(len(windowenv)):
+            windowenv[i]=windowenv[i]+win1[i]+win2[i]
+        for i in range(int(Window)):
+            if(x+i>=len(enveloppe-1)):
+                break
+            win=np.square(np.sin((2*np.pi*i)/Window))
+            val=win*enveloppe[x+i]
+            windowenv[x+i]=win+windowenv[x+i]
+            processedEnv[x+i]+=val
+            if(val>0):
+                somme=somme+val
+                nb=nb+1
+        if(nb>0):        
+            avg=somme/nb   
+    """
+    """
+        for i in range(int(x),int(x+Window)):
+            if(avg*np.square(np.sin((2*np.pi*i)/Window/2))>processedEnv[i]):
+                processedEnv[i]=0
+        """
+    return processedEnv,windowenv,timestamps
+
+
+
 label_keys={'linewidth': 1, 'linestyle': ':', 'color': 'b'}
 label_keys2={'linewidth': 1, 'linestyle': ':', 'color': 'k'}
 
-y, sr = librosa.load(easygui.fileopenbox(),duration=duration)
-onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+#chargement du fichier audio
+y, sr = librosa.load(easygui.fileopenbox(msg="sélectionnez un fichier",filetypes="\*.mp3"),duration=duration)
 
+"""
+filter=librosa.filters.mel(sr=sr,n_fft=4096)
+filterx,filtery=filter.shape
+for i in range(filtery):
+semitone_filterbank, sample_rates = librosa.filters.semitone_filterbank(
+    center_freqs=librosa.midi_to_hz(np.arange(60, 72)),
+    sample_rates=np.repeat(4410.0, 12),
+    flayout='sos'
+    )
+y=signal.lfilter(a=semitone_filterbank[1],b=semitone_filterbank[1],x=y)
+"""
+#calcul de la fonction de nouveauté (onsets) et de la plp (pulse)
+onset_env = librosa.onset.onset_strength(y=y, sr=sr)
 plp = librosa.beat.plp(onset_envelope=onset_env,tempo_min=30,tempo_max=300,win_length=300)
+beats_plp = librosa.util.localmax(plp)
 
 tempo, beats = librosa.beat.beat_track(y=y, units='time', trim=True,tightness=10)
+beats=beats.tolist()
+
+#réglage provisoire du tempo
 if(tempo>130):tempo = tempo/2
 elif(tempo<30):tempo = tempo*2  
-onsets = librosa.onset.onset_detect(y=y,hop_length=100, units='time')
 
+#fonctions de nouveauté supplémentaires
 novelty1=compute_novelty_energy(y, Fs=sr)
 novelty2,fs=compute_novelty_spectrum(y)
-#timestamps=fromNoveltyToTimestamps(librosa.util.normalize(onset_env),len(y),0.08)
-beats=beats.tolist()
-D = np.abs(librosa.stft(y))
-times = librosa.times_like(onset_env)
-beats_plp = librosa.util.localmax(plp)
+
+#post traitement de la fonction de nouveauté en préparation au peak picking
 half_env=onset_env-avg_env(onset_env)
 lissed_env=cap_env(half_env,0)
 half_env = signal.savgol_filter(half_env,10,3)
-timestamps2=fromNoveltyToTimestamps(librosa.util.normalize(lissed_env),len(y),0.3)
+#peak picking
+spikeselec,winEnv,timestamps2=localSpikeSelection(librosa.util.normalize(lissed_env))
 
+#normalisation des peaks en secondes
+timestampcpy=[]
+for i in range(len(timestamps2)):
+    timestampcpy.append(timestamps2[i]/len(winEnv)*duration)
+
+
+
+#normalisation de l'axe en vue de la représentation graphique
+times = librosa.times_like(onset_env)
+
+#création des axes matplotlib
 ax1 = plt.subplot(311)
 ax3 = plt.subplot(312,sharex=ax1)
 ax2 = plt.subplot(313,sharex=ax1)
+
+#affichage des axes
 wave=librosa.display.waveshow(y=y,ax=ax1,offset=0 ,sr=sr,color="blue") 
-ax3.plot(times,librosa.util.normalize(onset_env), alpha=0.8,label='onsetEnvelope?')
-ax3.plot(times,librosa.util.normalize(half_env), alpha=0.8,label='onsetEnvelope?')
-ax1.plot(times,beats_plp,color="red")
-ax2.plot(times,librosa.util.normalize(lissed_env))
-
-libfmp.b.plot_annotation_line(timestamps2*duration,ax1,label_keys=label_keys2,dpi=500,time_min=0, time_max=duration)
-#libfmp.b.plot_annotation_line(timestamps*duration,ax1,label_keys=label_keys2,dpi=500,time_min=0, time_max=duration)
-#plt.plot()
-
-print(len(novelty1),len(novelty2),len(y),tempo,len(plp))
+ax3.plot(times,librosa.util.normalize(onset_env), alpha=0.8,label='onsetEnvelope')
+ax3.plot(times,librosa.util.normalize(half_env), alpha=0.8,label='Half wave rectification')
+ax2.plot(times,librosa.util.normalize(lissed_env),label='Lissed Envelope')
+ax2.plot(times,spikeselec,label='peaks')
+ax2.plot(times,winEnv,label='?')
+libfmp.b.plot_annotation_line(timestampcpy,ax1,label_keys=label_keys2,dpi=500,time_min=0, time_max=duration)
 plt.show()
 
-to_csv(quantize_timestamps(timestamps2,beats,500,tempo,len(y)),beats,len(y),tempo)
+#envoi en .csv
+to_csv(quantize_timestamps(timestampcpy,beats,1000,tempo,len(y)),beats,len(y),tempo)
 csv_string = ""
 
 with open("test.csv", "r") as f:
