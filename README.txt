@@ -1,5 +1,16 @@
-references:
+Extraction de rythmes a partir de fichiers audio
 
--https://ieeexplore.ieee.org/abstract/document/5654580
--https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=1495485 : peak picking (smoothed novelty function? / local median useful with currently implemented windowing) / onset detection functions
--https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=e73b825b677d25a05b5735f52aaf208eb8669410 : tantum, onset detection , filtering audio, ACF,  time signature detection
+-lancer le programme
+-choisir le fichier audio (.mp3,.wav etc...)
+-sortie sous le nom output.mid
+
+le fichier parsed_csv.csv sert dans la conversion en midi.
+efficacité maximale sur les extraits de piano ou autres claviers
+je conseille d'éditer le midi avant de le convertir en partition afin d'éliminer manuellement les erreurs
+
+installer les libraries suivantes:
+-librosa
+-scipy
+-numpy
+-py_midicsv
+-easygui
